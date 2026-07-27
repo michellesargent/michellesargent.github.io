@@ -9,7 +9,6 @@ import {
   getCaseStudyCatalog,
   validateCatalog,
 } from './catalog';
-import { getThumbnailUrl } from './thumbnails';
 import type {
   Article,
   CaseStudy,
@@ -53,46 +52,85 @@ function extractPortfolioAngles(markdown: string): string[] {
     .map((line) => line.replace(/^- \[x\]\s*/, ''));
 }
 
+function toContentAssetUrl(
+  type: 'case-studies' | 'articles',
+  slug: string,
+  relativeFromSlug: string,
+): string {
+  const clean = relativeFromSlug.replace(/\\/g, '/').replace(/^\/+/, '');
+  return `/content-assets/${type}/${slug}/${clean}`;
+}
+
 function resolveThumbnail(
   type: 'case-studies' | 'articles',
   slug: string,
   relativePath?: string,
 ): string | null {
-  const candidates = [
-    relativePath ? path.join(repoRoot, 'work', type, slug, relativePath) : null,
-    path.join(repoRoot, 'work', type, slug, 'assets/thumbnail.png'),
-    path.join(repoRoot, 'work', type, slug, 'assets/thumbnail.svg'),
-  ].filter(Boolean) as string[];
+  const candidates: Array<{ abs: string; rel: string }> = [];
+  if (relativePath) {
+    candidates.push({
+      abs: path.join(repoRoot, 'work', type, slug, relativePath),
+      rel: relativePath,
+    });
+  }
+  candidates.push(
+    {
+      abs: path.join(repoRoot, 'work', type, slug, 'assets/thumbnail.png'),
+      rel: 'assets/thumbnail.png',
+    },
+    {
+      abs: path.join(repoRoot, 'work', type, slug, 'assets/thumbnail.svg'),
+      rel: 'assets/thumbnail.svg',
+    },
+  );
 
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
+    if (fs.existsSync(candidate.abs)) {
+      return toContentAssetUrl(type, slug, candidate.rel);
     }
   }
 
   return null;
 }
 
-function resolveAssetUrl(baseDir: string, relativePath: string): string {
-  const resolved = relativePath.startsWith('assets/')
-    ? path.join(baseDir, relativePath)
-    : relativePath;
-
-  if (resolved && fs.existsSync(resolved)) {
-    return getThumbnailUrl(resolved) ?? relativePath;
+function resolveAssetUrl(
+  type: 'case-studies' | 'articles',
+  slug: string,
+  relativePath: string,
+): string {
+  // Only rewrite in-repo asset references (e.g., `assets/foo.png`).
+  // Leave absolute URLs, root-relative paths, and other links untouched.
+  if (!relativePath || /^([a-z]+:)?\/\//i.test(relativePath) || relativePath.startsWith('/')) {
+    return relativePath;
+  }
+  if (!relativePath.startsWith('assets/')) {
+    return relativePath;
   }
 
-  return relativePath;
+  const absolute = path.join(repoRoot, 'work', type, slug, relativePath);
+  if (!fs.existsSync(absolute)) {
+    return relativePath;
+  }
+
+  return toContentAssetUrl(type, slug, relativePath);
 }
 
-function resolveGallery(baseDir: string, items: GalleryImageInput[] = []): GalleryImage[] {
+function resolveGallery(
+  type: 'case-studies' | 'articles',
+  slug: string,
+  items: GalleryImageInput[] = [],
+): GalleryImage[] {
   return items.map((item) => ({
-    src: resolveAssetUrl(baseDir, item.src),
+    src: resolveAssetUrl(type, slug, item.src),
     alt: item.alt,
   }));
 }
 
-function renderMarkdown(markdown: string, baseDir: string): string {
+function renderMarkdown(
+  markdown: string,
+  type: 'case-studies' | 'articles',
+  slug: string,
+): string {
   const renderer = new marked.Renderer();
 
   renderer.link = ({ href, title, text }) => {
@@ -112,7 +150,7 @@ function renderMarkdown(markdown: string, baseDir: string): string {
   };
 
   renderer.image = ({ href, title, text }) => {
-    const src = resolveAssetUrl(baseDir, href ?? '');
+    const src = resolveAssetUrl(type, slug, href ?? '');
     const alt = text || title || '';
     return `<img src="${src}" alt="${alt}" loading="lazy" />`;
   };
@@ -171,10 +209,10 @@ export function getCaseStudy(slug: string): CaseStudy | null {
     ...catalogEntry,
     metadata,
     excerpt: extractExcerpt(markdown),
-    bodyHtml: renderMarkdown(markdown, folder),
+    bodyHtml: renderMarkdown(markdown, 'case-studies', slug),
     thumbnail: thumbnailPath,
     thumbnailAlt: metadata.assets?.alt ?? metadata.title,
-    gallery: resolveGallery(folder, metadata.assets?.gallery),
+    gallery: resolveGallery('case-studies', slug, metadata.assets?.gallery),
     related: resolveRefs(relatedSlugs),
     portfolioAngles: metadata.portfolio_angles ?? extractPortfolioAngles(markdown),
   };
@@ -209,10 +247,10 @@ export function getArticle(slug: string): Article | null {
     ...catalogEntry,
     metadata,
     excerpt: extractExcerpt(markdown),
-    bodyHtml: renderMarkdown(markdown, folder),
+    bodyHtml: renderMarkdown(markdown, 'articles', slug),
     thumbnail: thumbnailPath,
     thumbnailAlt: metadata.assets?.alt ?? metadata.title,
-    gallery: resolveGallery(folder, metadata.assets?.gallery),
+    gallery: resolveGallery('articles', slug, metadata.assets?.gallery),
     related: resolveRefs(relatedSlugs),
     audience: metadata.audience,
   };

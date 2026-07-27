@@ -1,28 +1,20 @@
 // src/lib/content/thumbnails.ts
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+//
+// The content loader (`src/lib/content/loader.ts`) now emits public URLs
+// (e.g. `/content-assets/articles/<slug>/assets/thumbnail.png`) directly on
+// the `thumbnail` field. This helper is retained as a safe passthrough so
+// existing component call sites keep working, and so a future regression
+// that hands in an absolute filesystem path fails closed (returns null)
+// instead of producing a broken URL with the CI workspace path leaked in.
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+export function getThumbnailUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
 
-export function getThumbnailUrl(absolutePath: string | null): string | null {
-  if (!absolutePath) return null;
-  const normalized = absolutePath.replace(/\\/g, '/');
-
-  // Match the last '/work/<type>/' and return the canonical public path
-  const m = normalized.match(/\/work\/(case-studies|articles)\/(.+)$/);
-  if (m && m[1] && m[2]) {
-    return `/content-assets/${m[1]}/${m[2]}`;
-  }
-
-  // Fallback: try relative to repoRoot and strip everything before the final 'work/'.
-  try {
-    const rel = path.relative(repoRoot, absolutePath).replace(/\\/g, '/');
-    if (rel.includes('work/')) {
-      const afterWork = rel.split('work/').pop();
-      if (afterWork) return `/content-assets/${afterWork}`;
-    }
-  } catch (e) {
-    // ignore
+  // Already a URL we can serve: root-relative, protocol-relative, or absolute.
+  if (trimmed.startsWith('/') || /^([a-z]+:)?\/\//i.test(trimmed)) {
+    return trimmed;
   }
 
   return null;
